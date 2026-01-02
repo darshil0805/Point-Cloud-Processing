@@ -35,50 +35,45 @@ BASE_ROTATION_Z = 0.0
 # Most hand-eye calibration (like easy_handeye) outputs the transform to 'camera_link'.
 # However, depth points are in 'camera_color_optical_frame'.
 # This toggle applies the standard 90-degree ROS rotation.
-USE_ROS_OPTICAL_CONVENTION = True 
+USE_ROS_OPTICAL_CONVENTION = False 
 
-# D455 Specific: If calibration was done on Color Lens, 
-# but deprojection uses Depth (raw IR) lens, we need the baseline offset.
-# D455 depth-to-color baseline is approx 59mm along X-optical.
-# If deprojecting from depth, we need to shift points back to the color center 
-# so the hand-eye calibration (which was likely done wrt color) matches.
-D455_BASELINE_OFFSET = 0.059 # meters. Set to 0.0 if you use aligned depth or calibrated to depth.
-
-# If the wrist cloud is "inverted" or on the wrong side, try this:
+# If the wrist cloud is still "behind" the camera or inverted, try this:
 INVERT_WRIST_EXTRINSICS = False 
 
 # If left/right is swapped in the wrist view, toggle this:
 FLIP_WRIST_CLOUD_Y = False
 
 # --- IMPORTANT: Intrinsics Selection ---
-USE_COLOR_INTRINSICS = False # User preferred False for better results
+USE_COLOR_INTRINSICS = True  # True = RGB intrinsics (recommended for RealSense)
 
-# Camera1 extrinsics (EEF -> Camera_Link/Color Lens)
+# Camera1 extrinsics (EEF -> Camera_Link)
+# EEF_TO_WRIST_CAM = np.array([
+#     [-0.00179952,  0.02153973,  0.99976637,  0.072252  ],
+#     [ 0.01309415, -0.99968177,  0.02156148, -0.05377971],
+#     [ 0.99991265,  0.01312989,  0.0015169,   0.03106089],
+#     [ 0.0,         0.0,         0.0,         1.0]
+# ], dtype=np.float32)
+
+
+#Camera1 extrinsics (EEF -> Camera_Optical_Frame)
 EEF_TO_WRIST_CAM = np.array([
-    [-0.00179952,  0.02153973,  0.99976637,  0.072252  ],
-    [ 0.01309415, -0.99968177,  0.02156148, -0.05377971],
-    [ 0.99991265,  0.01312989,  0.0015169,   0.03106089],
+    [-0.0140339,  -0.99989573,  0.00340287,  0.05830656  ],
+    [ 0.99975296, -0.0140904,  -0.01718981, 0.02025594],
+    [ 0.01723596,  0.00316079,  0.99984645,  0.03893953],
     [ 0.0,         0.0,         0.0,         1.0]
 ], dtype=np.float32)
 
 
 if USE_ROS_OPTICAL_CONVENTION:
     # Rotate points from Optical frame (Z-forward) to Link frame (X-forward)
+    # x_link = z_opt, y_link = -x_opt, z_link = -y_opt
     T_opt_link = np.array([
         [0, 0, 1, 0],
         [-1, 0, 0, 0],
         [0, -1, 0, 0],
         [0, 0, 0, 1]
     ], dtype=np.float32)
-    
-    # If using depth intrinsics but calibrated to color, add the baseline shift
-    if not USE_COLOR_INTRINSICS and D455_BASELINE_OFFSET != 0:
-        # Shift Optical X by baseline to align Depth origin with Color origin
-        T_depth_to_color = np.eye(4, dtype=np.float32)
-        T_depth_to_color[0, 3] = D455_BASELINE_OFFSET
-        EEF_TO_WRIST_CAM = EEF_TO_WRIST_CAM @ T_opt_link @ T_depth_to_color
-    else:
-        EEF_TO_WRIST_CAM = EEF_TO_WRIST_CAM @ T_opt_link
+    EEF_TO_WRIST_CAM = EEF_TO_WRIST_CAM @ T_opt_link
 
 if INVERT_WRIST_EXTRINSICS:
     EEF_TO_WRIST_CAM = np.linalg.inv(EEF_TO_WRIST_CAM)
