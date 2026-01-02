@@ -21,7 +21,7 @@ from rosidl_runtime_py.utilities import get_message
 # -------------------------
 BAG_PATH = "/home/skills/varun/dual_data/joint_trajectory_1"
 EXTRACTED_DATA_ROOT = "/home/skills/varun/dual_data/extracted_data"
-OUTPUT_ROOT = "/home/skills/varun/dual_data/point_clouds_test_90_inv_wrist"
+OUTPUT_ROOT = "/home/skills/varun/dual_data/point_clouds_opt_frame"
 
 # URDF path for FK computation
 URDF_PATH = "/home/skills/varun/Point-Cloud-Processing/lite-6-updated-urdf/lite_6_new.urdf"
@@ -37,16 +37,23 @@ BASE_ROTATION_Z = 0.0
 # This toggle applies the standard 90-degree ROS rotation.
 USE_ROS_OPTICAL_CONVENTION = True 
 
-# If the wrist cloud is still "behind" the camera or inverted, try this:
+# D455 Specific: If calibration was done on Color Lens, 
+# but deprojection uses Depth (raw IR) lens, we need the baseline offset.
+# D455 depth-to-color baseline is approx 59mm along X-optical.
+# If deprojecting from depth, we need to shift points back to the color center 
+# so the hand-eye calibration (which was likely done wrt color) matches.
+D455_BASELINE_OFFSET = 0.059 # meters. Set to 0.0 if you use aligned depth or calibrated to depth.
+
+# If the wrist cloud is "inverted" or on the wrong side, try this:
 INVERT_WRIST_EXTRINSICS = False 
 
 # If left/right is swapped in the wrist view, toggle this:
 FLIP_WRIST_CLOUD_Y = False
 
 # --- IMPORTANT: Intrinsics Selection ---
-USE_COLOR_INTRINSICS = False  # True = RGB intrinsics (recommended for RealSense)
+USE_COLOR_INTRINSICS = False # User preferred False for better results
 
-# Camera1 extrinsics (EEF -> Camera_Link)
+# Camera1 extrinsics (EEF -> Camera_Link/Color Lens)
 EEF_TO_WRIST_CAM = np.array([
     [-0.00179952,  0.02153973,  0.99976637,  0.072252  ],
     [ 0.01309415, -0.99968177,  0.02156148, -0.05377971],
@@ -54,16 +61,24 @@ EEF_TO_WRIST_CAM = np.array([
     [ 0.0,         0.0,         0.0,         1.0]
 ], dtype=np.float32)
 
+
 if USE_ROS_OPTICAL_CONVENTION:
     # Rotate points from Optical frame (Z-forward) to Link frame (X-forward)
-    # x_link = z_opt, y_link = -x_opt, z_link = -y_opt
     T_opt_link = np.array([
         [0, 0, 1, 0],
         [-1, 0, 0, 0],
         [0, -1, 0, 0],
         [0, 0, 0, 1]
     ], dtype=np.float32)
-    EEF_TO_WRIST_CAM = EEF_TO_WRIST_CAM @ T_opt_link
+    
+    # If using depth intrinsics but calibrated to color, add the baseline shift
+    if not USE_COLOR_INTRINSICS and D455_BASELINE_OFFSET != 0:
+        # Shift Optical X by baseline to align Depth origin with Color origin
+        T_depth_to_color = np.eye(4, dtype=np.float32)
+        T_depth_to_color[0, 3] = D455_BASELINE_OFFSET
+        EEF_TO_WRIST_CAM = EEF_TO_WRIST_CAM @ T_opt_link @ T_depth_to_color
+    else:
+        EEF_TO_WRIST_CAM = EEF_TO_WRIST_CAM @ T_opt_link
 
 if INVERT_WRIST_EXTRINSICS:
     EEF_TO_WRIST_CAM = np.linalg.inv(EEF_TO_WRIST_CAM)
@@ -302,6 +317,7 @@ def process_trajectory(traj_name, bag_path, extracted_data_root, output_root):
 
         # Compute camera poses in global frame
         T_base_cam1 = T_base_eef @ EEF_TO_WRIST_CAM  # Camera1 on wrist
+        #T_base_cam1 = EEF_TO_WRIST_CAM
         T_base_cam2 = BASE_TO_EYE_CAM  # Camera2 fixed in world
         
         cam1_poses_list.append(T_base_cam1.flatten())
