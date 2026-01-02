@@ -7,7 +7,7 @@ import time
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize a sequence of PLY point clouds in Rerun.")
-    parser.add_argument("--dir", type=str, default="/scratch2/cross-emb/processed/final-data/pc/sync_data_bag_5", help="Directory containing .ply files")
+    parser.add_argument("--dir", type=str, default="/home/skills/varun/dual_data/point_clouds/joint_trajectory_1/camera1_global_frame", help="Directory containing .ply files")
     parser.add_argument("--serve", action="store_true", help="Serve the Rerun viewer over the web")
     parser.add_argument("--save", type=str, default=None, help="Save the recording to a .rrd file")
     parser.add_argument("--port", type=int, default=8812, help="Port to serve the web viewer on")
