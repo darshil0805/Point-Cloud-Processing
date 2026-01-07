@@ -34,9 +34,9 @@ def process_point_cloud(pc_xyz, pc_rgb):
     """
 
     WORK_SPACE = [
-        [-0.855, 0.855],  # X (radius)
-        [-0.855, 0.855],  # Y (radius)
-        [-0.360, 1.190]   # Z (height)
+        [0, 0.5],  # X (radius)
+        [-0.3, -0.17],  # Y (radius)
+        [0.02, 1.190]   # Z (height)
     ]
 
     mask = (
@@ -72,42 +72,41 @@ def save_ply(path, xyz, rgb):
 # ---------------------------
 # MAIN BATCH PROCESSOR
 # ---------------------------
-INPUT_ROOT = "/scratch2/cross-emb/old_processed/final-data/pc"
-OUTPUT_ROOT = "/scratch2/cross-emb/old_processed/final-data/filtered-pc"
+INPUT_ROOT = "/home/skills/varun/latest_jan/jan_25_1/point_clouds_no_offset_color/jan_25_1/camera2_global_frame"
+OUTPUT_ROOT = "/home/skills/varun/latest_jan/jan_25_1/point_clouds_no_offset_color_filtered"
 
 os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
-for folder in sorted(os.listdir(INPUT_ROOT)):
-    in_folder = os.path.join(INPUT_ROOT, folder)
-    if not os.path.isdir(in_folder):
-        continue
+# for folder in sorted(os.listdir(INPUT_ROOT)):
+in_folder = os.path.join(INPUT_ROOT)
+# if not os.path.isdir(in_folder):
+#     continue
 
-    out_folder = os.path.join(OUTPUT_ROOT, folder)
-    os.makedirs(out_folder, exist_ok=True)
+out_folder = os.path.join(OUTPUT_ROOT)
+os.makedirs(out_folder, exist_ok=True)
 
-    ply_files = sorted([f for f in os.listdir(in_folder) if f.endswith(".ply")])
+ply_files = sorted([f for f in os.listdir(in_folder) if f.endswith(".ply")])
 
-    print(f"\n=== Processing folder: {folder} ({len(ply_files)} clouds) ===")
+print(f"\n=== Processing folder: {in_folder} ({len(ply_files)} clouds) ===")
 
-    for fn in ply_files:
-        in_path = os.path.join(in_folder, fn)
-        out_path = os.path.join(out_folder, fn.replace(".ply", "_filtered.ply"))
+for fn in ply_files:
+    in_path = os.path.join(in_folder, fn)
+    out_path = os.path.join(out_folder, fn.replace(".ply", "_filtered.ply"))
 
-        print(f"\nProcessing {fn} ...")
+    print(f"\nProcessing {fn} ...")
 
-        # Load
-        pcd = o3d.io.read_point_cloud(in_path)
-        pc_xyz = np.asarray(pcd.points)
-        pc_rgb = np.asarray(pcd.colors)
+    # Load
+    pcd = o3d.io.read_point_cloud(in_path)
+    pc_xyz = np.asarray(pcd.points)
+    pc_rgb = np.asarray(pcd.colors)
 
-        print(f"Loaded XYZ: {pc_xyz.shape} | RGB: {pc_rgb.shape}")
+    print(f"Loaded XYZ: {pc_xyz.shape} | RGB: {pc_rgb.shape}")
 
-        # Filter
-        xyz_f, rgb_f = process_point_cloud(pc_xyz, pc_rgb)
+    # Filter
+    xyz_f, rgb_f = process_point_cloud(pc_xyz, pc_rgb)
+    # Save
+    save_ply(out_path, xyz_f, rgb_f)
 
-        # Save
-        save_ply(out_path, xyz_f, rgb_f)
-
-        print(f"Saved → {out_path}")
+    print(f"Saved → {out_path}")
 
 print("\n✔ Done. All filtered clouds saved in ./filtered-pc/")
