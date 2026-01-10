@@ -1,5 +1,4 @@
 import rerun as rr
-import open3d as o3d
 import pathlib
 import numpy as np
 import argparse
@@ -8,8 +7,7 @@ import re
 import cv2 # Added for depth and RGB image processing
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize a sequence of PLY point clouds in Rerun.")
-    parser.add_argument("--dir", type=str, default=None, help="Directory containing .ply files")
+    parser = argparse.ArgumentParser(description="Visualize a sequence of RGB and Depth images in Rerun.")
     parser.add_argument("--depth_dir", type=str, default=None, help="Directory containing .npy depth files")
     parser.add_argument("--rgb_dir", type=str, default=None, help="Directory containing .png RGB files")
     parser.add_argument("--serve", action="store_true", help="Serve the Rerun viewer over the web")
@@ -18,8 +16,8 @@ def main():
     parser.add_argument("--ws-port", type=int, default=9876, help="Port for the WebSocket data stream")
     args = parser.parse_args()
 
-    if not args.dir and not args.depth_dir and not args.rgb_dir:
-        print("Error: At least one of --dir, --depth_dir, or --rgb_dir must be specified.")
+    if not args.depth_dir and not args.rgb_dir:
+        print("Error: At least one of --depth_dir or --rgb_dir must be specified.")
         return
 
     # Initialize Rerun
@@ -43,16 +41,6 @@ def main():
     def natural_sort_key(s):
         return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', str(s))]
 
-    # Collect files
-    ply_files = []
-    if args.dir:
-        data_dir = pathlib.Path(args.dir)
-        if not data_dir.exists():
-            print(f"Directory {data_dir} does not exist.")
-            return
-        ply_files = sorted(list(data_dir.glob("*.ply")), key=natural_sort_key)
-        print(f"Found {len(ply_files)} PLY files.")
-
     depth_files = []
     if args.depth_dir:
         depth_path = pathlib.Path(args.depth_dir)
@@ -72,40 +60,17 @@ def main():
         print(f"Found {len(rgb_files)} RGB files.")
 
     # We'll use the largest collection to drive the loop
-    max_len = max(len(ply_files), len(depth_files), len(rgb_files))
+    max_len = max(len(depth_files), len(rgb_files))
     
-    # Map index to frame
-    def get_frame_num(path):
-        match = re.search(r'(\d+)', path.name)
-        return int(match.group(1)) if match else None
-
-    # Sync by frame number if possible, or just index
-    # For now, let's assume they are aligned by index if they have the same length
-    # or just use the smallest set as the driver.
-    
-    num_frames = max_len
-    
-    if num_frames == 0:
+    if max_len == 0:
         print("No files found in any specified directory.")
         return
 
-    print(f"Starting visualization for {num_frames} frames...")
+    print(f"Starting visualization for {max_len} frames...")
 
-    for i in range(num_frames):
+    for i in range(max_len):
         # Set the timeline
         rr.set_time_sequence("frame", i)
-        
-        # Log Point Cloud
-        if i < len(ply_files):
-            ply_path = ply_files[i]
-            pcd = o3d.io.read_point_cloud(str(ply_path))
-            points = np.asarray(pcd.points)
-            colors = np.asarray(pcd.colors)
-            if colors.size > 0:
-                # Open3D colors are 0-1, Rerun expects 0-255 if using uint8, or 0-1 if float
-                rr.log("world/point_cloud", rr.Points3D(positions=points, colors=colors))
-            else:
-                rr.log("world/point_cloud", rr.Points3D(positions=points))
         
         # Log Depth
         if i < len(depth_files):
@@ -118,11 +83,12 @@ def main():
         if i < len(rgb_files):
             rgb_path = rgb_files[i]
             rgb_data = cv2.imread(str(rgb_path))
-            rgb_data = cv2.cvtColor(rgb_data, cv2.COLOR_BGR2RGB)
-            rr.log("camera/rgb", rr.Image(rgb_data))
+            if rgb_data is not None:
+                rgb_data = cv2.cvtColor(rgb_data, cv2.COLOR_BGR2RGB)
+                rr.log("camera/rgb", rr.Image(rgb_data))
         
         if i % 20 == 0:
-            print(f"Processed frame {i}/{num_frames}")
+            print(f"Processed frame {i}/{max_len}")
 
     print("Done logging.")
     
@@ -138,3 +104,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

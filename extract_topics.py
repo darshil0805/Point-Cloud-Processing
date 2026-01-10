@@ -11,11 +11,14 @@ import rosbag2_py
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
+import argparse
+
 # -------------------------
 # CONFIG
 # -------------------------
-BAG_PATH = "/home/skills/varun/dual_data/joint_trajectory_1"
-OUTPUT_ROOT = "/home/skills/varun/dual_data/extracted_data"
+# Defaults (can be overridden by CLI)
+BAG_PATH = "/home/skills/varun/latest_jan/jan_25_1"
+OUTPUT_ROOT = "/home/skills/varun/latest_jan/jan_25_1/extracted_data"
 
 # Topics to extract (based on actual bag topics)
 TOPICS = {
@@ -30,6 +33,7 @@ TOPICS = {
     'camera2_depth': '/camera2/camera2/depth/image_rect_raw',
     'camera2_color_info': '/camera2/camera2/color/camera_info',
     'camera2_depth_info': '/camera2/camera2/depth/camera_info',
+    'joint_command': '/lite6_traj_controller/joint_trajectory',
 }
 
 # -------------------------
@@ -128,6 +132,13 @@ def extract_controller_positions(msg):
     print("⚠️ Warning: controller_state has no usable joint position fields")
     return None
 
+def extract_cmd_positions(msg):
+    """Extract joint positions from JointTrajectory message."""
+    if hasattr(msg, 'points') and len(msg.points) > 0:
+        if hasattr(msg.points[0], 'positions'):
+            return np.array(msg.points[0].positions, dtype=np.float32)[:6]
+    return np.zeros(6, dtype=np.float32)
+
 # -------------------------
 # MAIN PROCESSING
 # -------------------------
@@ -218,6 +229,7 @@ def process_bag(bag_path, output_root):
     states = []
     gripper_commands = []
     gripper_states_list = []
+    cmd_positions_list = []
     saved_frames = 0
     
     for i in range(N):
@@ -241,6 +253,13 @@ def process_bag(bag_path, output_root):
         if indices['joint_states'] is not None:
             joint_msg = data['joint_states']['msgs'][indices['joint_states'][i]]
             joint_pos = extract_joint_positions(joint_msg)
+        
+        # Get joint commands
+        cmd_pos = np.zeros(6, dtype=np.float32)
+        if indices['joint_command'] is not None:
+            cmd_msg = data['joint_command']['msgs'][indices['joint_command'][i]]
+            cmd_pos = extract_cmd_positions(cmd_msg)
+        cmd_positions_list.append(cmd_pos)
         
         # Save Camera 1 RGB
         if indices['camera1_rgb'] is not None:
@@ -301,21 +320,22 @@ def process_bag(bag_path, output_root):
         gripper_commands_arr = np.array(gripper_commands[:len(states)], dtype=np.float32)
         gripper_states_arr = np.array(gripper_states_list[:len(states)], dtype=np.float32)
         
-        # Compute actions as deltas
-        # Actions = [joint_delta (6) + gripper_state_delta (1)]
-        joint_states = states[:, :6]  # First 6 columns are joints
+        actual_joint_states = states[:, :6]
+        cmd_joint_states = np.vstack(cmd_positions_list[:len(states)]).astype(np.float32)
         
-        actions = np.zeros_like(states, dtype=np.float32)
-        # Joint deltas: current - previous
-        actions[1:, :6] = joint_states[1:] - joint_states[:-1]
-        # Gripper state deltas (use gripper state, not command)
-        actions[1:, 6] = gripper_states_arr[1:] - gripper_states_arr[:-1]
+        # 2. Commanded actions (stored directly - per user request)
+        commanded_actions = np.zeros_like(states, dtype=np.float32)
+        commanded_actions[:, :6] = cmd_joint_states
+        commanded_actions[:, 6] = gripper_commands_arr
         
-        # First frame has zero action (no previous frame to compare)
-        actions[0, :] = 0.0
+        # 1. Actual deltas (still used for pruning frames where robot was stuck)
+        actual_actions = np.zeros_like(states, dtype=np.float32)
+        actual_actions[1:, :6] = actual_joint_states[1:] - actual_joint_states[:-1]
+        actual_actions[1:, 6] = gripper_states_arr[1:] - gripper_states_arr[:-1]
+        actual_actions[0, :] = 0.0
         
-        # Remove frames where all actions are zero (robot was stationary/trajectory had issues)
-        nonzero_idx = np.any(actions != 0, axis=1)
+        # Remove frames where all ACTUAL actions are zero (robot was stationary/trajectory had issues)
+        nonzero_idx = np.any(actual_actions != 0, axis=1)
         
         # Count how many frames will be removed
         num_zero_frames = np.sum(~nonzero_idx)
@@ -340,7 +360,7 @@ def process_bag(bag_path, output_root):
             
             # Filter states and actions
             states_filtered = states[nonzero_idx]
-            actions_filtered = actions[nonzero_idx]
+            actions_filtered = commanded_actions[nonzero_idx]
             
             # Renumber remaining files sequentially
             print(f"  Renumbering remaining {len(states_filtered)} frames...")
@@ -357,7 +377,7 @@ def process_bag(bag_path, output_root):
                      os.path.join(camera2_depth_out, f"depth_{new_idx:05d}.npy")),
                 ]:
                     if os.path.exists(old_name) and old_idx != new_idx:
-                        os.rename(old_name, old_name + ".tmp")
+                        os.rename(old_name, new_name + ".tmp")
             
             # Second pass: rename .tmp files to final names
             for new_idx in range(len(states_filtered)):
@@ -373,7 +393,7 @@ def process_bag(bag_path, output_root):
                         os.rename(tmp_name, final_name)
         else:
             states_filtered = states
-            actions_filtered = actions
+            actions_filtered = commanded_actions
         
         # Save filtered states and actions
         states_file = os.path.join(traj_out, "states.txt")
@@ -395,5 +415,10 @@ def process_bag(bag_path, output_root):
 # RUN
 # -------------------------
 if __name__ == "__main__":
-    process_bag(BAG_PATH, OUTPUT_ROOT)
+    parser = argparse.ArgumentParser(description="Extract topics from a ROS2 bag.")
+    parser.add_argument("--bag_path", type=str, default=BAG_PATH, help="Path to the ROS2 bag directory.")
+    parser.add_argument("--output_root", type=str, default=OUTPUT_ROOT, help="Output root directory.")
+    args = parser.parse_args()
+    
+    process_bag(args.bag_path, args.output_root)
 

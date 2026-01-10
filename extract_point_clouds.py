@@ -19,9 +19,9 @@ from rosidl_runtime_py.utilities import get_message
 # -------------------------
 # CONFIG
 # -------------------------
-BAG_PATH = "/home/skills/varun/dual_data/joint_trajectory_1"
-EXTRACTED_DATA_ROOT = "/home/skills/varun/dual_data/extracted_data"
-OUTPUT_ROOT = "/home/skills/varun/dual_data/point_clouds_opt_frame"
+BAG_PATH = "/home/skills/varun/latest_jan/jan_25_1"
+EXTRACTED_DATA_ROOT = "/home/skills/varun/latest_jan/jan_25_1/extracted_data"
+OUTPUT_ROOT = "/home/skills/varun/latest_jan/jan_25_1/point_clouds_no_offset_color"
 
 # URDF path for FK computation
 URDF_PATH = "/home/skills/varun/Point-Cloud-Processing/lite-6-updated-urdf/lite_6_new.urdf"
@@ -31,20 +31,20 @@ EEF_INDEX = 6  # flange link (link_eef)
 # Since Cam2 is accurate, we keep base rotation at 0.
 BASE_ROTATION_Z = 0.0 
 
-# Frame convention correction:
-# Most hand-eye calibration (like easy_handeye) outputs the transform to 'camera_link'.
-# However, depth points are in 'camera_color_optical_frame'.
-# This toggle applies the standard 90-degree ROS rotation.
-USE_ROS_OPTICAL_CONVENTION = False 
-
-# If the wrist cloud is still "behind" the camera or inverted, try this:
-INVERT_WRIST_EXTRINSICS = False 
-
-# If left/right is swapped in the wrist view, toggle this:
-FLIP_WRIST_CLOUD_Y = False
-
 # --- IMPORTANT: Intrinsics Selection ---
 USE_COLOR_INTRINSICS = True  # True = RGB intrinsics (recommended for RealSense)
+
+# --- COLOR TO DEPTH OFFSET (RealSense Baseline) ---
+# Use this if your extrinsics are for 'color_optical_frame' but points are in 'depth_optical_frame'
+# and they ARE NOT already aligned in the driver.
+USE_COLOR_TO_DEPTH_OFFSET = False 
+
+T_COLOR_OPTICAL_DEPTH_OPTICAL = np.array([
+    [ 1.0,      0.0,      0.0,     -0.059 ],
+    [ 0.0,      1.0,      0.0,    0.0    ],
+    [ 0.0,      0.0,      1.0,    0.0    ],
+    [ 0.0,      0.0,      0.0,      1.0    ]
+], dtype=np.float32)
 
 # Camera1 extrinsics (EEF -> Camera_Link)
 # EEF_TO_WRIST_CAM = np.array([
@@ -64,26 +64,12 @@ EEF_TO_WRIST_CAM = np.array([
 ], dtype=np.float32)
 
 
-if USE_ROS_OPTICAL_CONVENTION:
-    # Rotate points from Optical frame (Z-forward) to Link frame (X-forward)
-    # x_link = z_opt, y_link = -x_opt, z_link = -y_opt
-    T_opt_link = np.array([
-        [0, 0, 1, 0],
-        [-1, 0, 0, 0],
-        [0, -1, 0, 0],
-        [0, 0, 0, 1]
-    ], dtype=np.float32)
-    EEF_TO_WRIST_CAM = EEF_TO_WRIST_CAM @ T_opt_link
-
-if INVERT_WRIST_EXTRINSICS:
-    EEF_TO_WRIST_CAM = np.linalg.inv(EEF_TO_WRIST_CAM)
-
 # Camera2 extrinsics (Base -> Camera)
 BASE_TO_EYE_CAM = np.array([
-    [ 0.983,   0.0274, -0.1813,  0.7653],
-    [ 0.1803,  0.0373,  0.9829, -0.6609],
-    [ 0.0337, -0.9989,  0.0317,  0.369 ],
-    [ 0.0,     0.0,     0.0,     1.0    ]
+    [ 0.9882, -0.0163,  0.1522,  0.3611],
+    [-0.1524, -0.0092,  0.9883, -0.8294],
+    [-0.0147, -0.9998, -0.0116,  0.4017],
+    [ 0.0,     0.0,     0.0,     1.0   ]
 ], dtype=np.float32)
 
 # Topics for camera info
@@ -178,7 +164,7 @@ def compute_eef_pose(robot_id, joint_angles):
     # Apply base rotation
     return get_base_transform() @ T_rel
 
-def depth_to_pointcloud(depth, fx, fy, cx, cy, flip_y=False):
+def depth_to_pointcloud(depth, fx, fy, cx, cy):
     """Convert depth image to 3D point cloud in camera coordinates."""
     h, w = depth.shape
     u, v = np.meshgrid(np.arange(w), np.arange(h))
@@ -188,9 +174,6 @@ def depth_to_pointcloud(depth, fx, fy, cx, cy, flip_y=False):
     X = (u - cx) * Z / fx
     Y = (v - cy) * Z / fy
     
-    if flip_y:
-        X = -X
-        
     return np.stack((X, Y, Z), axis=-1).reshape(-1, 3)
 
 def transform_pointcloud(points, transform_matrix):
@@ -312,8 +295,11 @@ def process_trajectory(traj_name, bag_path, extracted_data_root, output_root):
 
         # Compute camera poses in global frame
         T_base_cam1 = T_base_eef @ EEF_TO_WRIST_CAM  # Camera1 on wrist
-        #T_base_cam1 = EEF_TO_WRIST_CAM
-        T_base_cam2 = BASE_TO_EYE_CAM  # Camera2 fixed in world
+        T_base_cam2 = BASE_TO_EYE_CAM                # Camera2 fixed in world
+        
+        if USE_COLOR_TO_DEPTH_OFFSET:
+            T_base_cam1 = T_base_cam1 @ T_COLOR_OPTICAL_DEPTH_OPTICAL
+            T_base_cam2 = T_base_cam2 @ T_COLOR_OPTICAL_DEPTH_OPTICAL
         
         cam1_poses_list.append(T_base_cam1.flatten())
         cam2_poses_list.append(T_base_cam2.flatten())
@@ -333,8 +319,7 @@ def process_trajectory(traj_name, bag_path, extracted_data_root, output_root):
                 cam1_intrinsics['fx'], 
                 cam1_intrinsics['fy'],
                 cam1_intrinsics['cx'], 
-                cam1_intrinsics['cy'],
-                flip_y=FLIP_WRIST_CLOUD_Y
+                cam1_intrinsics['cy']
             )
             colors1 = (rgb1.reshape(-1, 3) / 255.0).astype(np.float32)
             

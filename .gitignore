@@ -1,2 +1,4 @@
 /rrd_files
 *.rrd
+/scratchbook
+final_no_eef.zarr
