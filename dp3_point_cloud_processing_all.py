@@ -48,6 +48,8 @@ def process_point_cloud(pc_xyz, pc_rgb):
     pc_xyz = pc_xyz[mask]
     pc_rgb = pc_rgb[mask]
 
+    print(f" → After crop: {pc_xyz.shape[0]} points")
+
     if pc_xyz.shape[0] == 0:
         return None, None
 
@@ -55,6 +57,8 @@ def process_point_cloud(pc_xyz, pc_rgb):
     num_points = min(2500, pc_xyz.shape[0])
     pc_xyz_fps, idx = farthest_point_sampling(pc_xyz, num_points=num_points, use_cuda=torch.cuda.is_available())
     pc_rgb_fps = pc_rgb[idx]
+
+    print(f" → After FPS: {pc_xyz_fps.shape[0]} points")
 
     return pc_xyz_fps, pc_rgb_fps
 
@@ -107,10 +111,14 @@ def main():
             in_path = os.path.join(in_folder, fn)
             out_path = os.path.join(out_folder, fn) # Keeping same name for easier downstream use
             
+            print(f"\nProcessing {fn} ...")
+            
             # Load
             pcd = o3d.io.read_point_cloud(in_path)
             pc_xyz = np.asarray(pcd.points)
             pc_rgb = np.asarray(pcd.colors)
+            
+            print(f"Loaded XYZ: {pc_xyz.shape} | RGB: {pc_rgb.shape}")
             
             if pc_xyz.size == 0:
                 continue
@@ -121,6 +129,7 @@ def main():
             if xyz_f is not None:
                 # Save
                 save_ply(out_path, xyz_f, rgb_f)
+                print(f"Saved → {out_path}")
 
     print("\n✅ All processing complete.")
 

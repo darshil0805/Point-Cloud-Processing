@@ -230,6 +230,7 @@ def process_bag(bag_path, output_root):
     gripper_commands = []
     gripper_states_list = []
     cmd_positions_list = []
+    timestamps_list = []  # Track synchronized timestamps
     saved_frames = 0
     
     for i in range(N):
@@ -239,6 +240,9 @@ def process_bag(bag_path, output_root):
         gripper_state_msg = data['gripper_state']['msgs'][i]
         gripper_state_val = extract_gripper_state(gripper_state_msg)
         gripper_states_list.append(gripper_state_val)
+        
+        # Record the synchronized timestamp (in nanoseconds)
+        timestamps_list.append(master_ts[i])
         
         # Get gripper command
         gripper_cmd_val = 0.0
@@ -394,15 +398,24 @@ def process_bag(bag_path, output_root):
         else:
             states_filtered = states
             actions_filtered = commanded_actions
+            nonzero_idx = np.ones(len(states), dtype=bool)  # All frames kept
         
-        # Save filtered states and actions
+        # Filter timestamps to match filtered frames
+        timestamps_arr = np.array(timestamps_list[:len(states)], dtype=np.int64)
+        timestamps_filtered = timestamps_arr[nonzero_idx]
+        
+        # Save filtered states, actions, and timestamps
         states_file = os.path.join(traj_out, "states.txt")
         actions_file = os.path.join(traj_out, "actions.txt")
+        timestamps_file = os.path.join(traj_out, "timestamps.txt")
+        
         np.savetxt(states_file, states_filtered, fmt="%.6f")
         np.savetxt(actions_file, actions_filtered, fmt="%.6f")
+        np.savetxt(timestamps_file, timestamps_filtered, fmt="%d")
         
         print(f"\n✓ States saved: {states_file} (shape: {states_filtered.shape})")
         print(f"✓ Actions saved: {actions_file} (shape: {actions_filtered.shape})")
+        print(f"✓ Timestamps saved: {timestamps_file} (shape: {timestamps_filtered.shape})")
     
     print(f"\n✓ Processing complete!")
     print(f"  Output directory: {output_root}")
