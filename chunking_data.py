@@ -14,8 +14,18 @@ import shutil
 EXTRACTED_DATA_ROOT = "/home/skills/varun/latest_jan/extracted_data_all"
 PC_ROOT = "/media/skills/RRC HDD A/cross-emb/Processed_Data_Rea_Training/latest_jan/point_clouds_cam2_only_color_intr_no_offset"
 
-OUT_ZARR = "/media/skills/RRC HDD A/cross-emb/Processed_Data_Rea_Training/latest_jan/latest_jan_data.zarr"
+OUT_ZARR = "/media/skills/RRC HDD A/cross-emb/Processed_Data_Rea_Training/latest_jan/full_frequency_deltas.zarr"
 CHUNK_SIZE = 100  # number of samples per chunk
+
+# Frame sampling: 1 = every frame, 2 = every 2nd frame, 4 = every 4th frame, etc.
+FRAME_SKIP = 1  # Set to 1 for all frames, 4 for every 4th frame, etc.
+
+# Gripper action normalization: Convert 7th dimension from -30/0/+30 to -1/0/+1
+NORMALIZE_GRIPPER = True  # Set to True to normalize gripper actions
+
+# Joint deltas: Convert actions to deltas (action_joints - state_joints) for first 6 dims
+# Gripper action (7th dim) remains unchanged
+USE_JOINT_DELTAS = True  # Set to True to use joint deltas instead of absolute positions
 
 # Subdirectory structure within each trajectory folder
 PC_SUBDIR = "camera2_global_frame_filtered"
@@ -54,21 +64,46 @@ for traj in tqdm(trajectories, desc="Trajectories"):
         continue
 
     # --- Actions ---
-    action_arr = np.loadtxt(action_file)
+    action_arr_raw = np.loadtxt(action_file)
     # --- States ---
-    state_arr = np.loadtxt(state_file)
+    state_arr_raw = np.loadtxt(state_file)
     
     # Check if shape is (N, 7) or (7,) for single step trajs? Usually (N, 7)
-    if action_arr.ndim == 1:
-        action_arr = action_arr.reshape(1, -1)
-    if state_arr.ndim == 1:
-        state_arr = state_arr.reshape(1, -1)
+    if action_arr_raw.ndim == 1:
+        action_arr_raw = action_arr_raw.reshape(1, -1)
+    if state_arr_raw.ndim == 1:
+        state_arr_raw = state_arr_raw.reshape(1, -1)
+    
+    # Apply frame skip with offset pairing:
+    # State from frame i, Action from frame i + FRAME_SKIP - 1
+    # Example with FRAME_SKIP=4: State[0]->Action[3], State[4]->Action[7], etc.
+    state_indices = np.arange(0, len(state_arr_raw), FRAME_SKIP)
+    action_indices = np.minimum(state_indices + FRAME_SKIP - 1, len(action_arr_raw) - 1)
+    
+    state_arr = state_arr_raw[state_indices]
+    action_arr = action_arr_raw[action_indices]
+    
+    # Convert to joint deltas if enabled
+    if USE_JOINT_DELTAS:
+        # Compute deltas for first 6 dimensions (joints)
+        # Keep 7th dimension (gripper) unchanged
+        if action_arr.shape[1] >= 7 and state_arr.shape[1] >= 6:
+            action_arr[:, :6] = action_arr[:, :6] - state_arr[:, :6]
+    
+    # Normalize gripper actions (7th dimension) from -30/0/+30 to -1/0/+1
+    if NORMALIZE_GRIPPER and action_arr.shape[1] >= 7:
+        # The 7th dimension is at index 6 (0-indexed)
+        # Convert -30 -> -1, 0 -> 0, +30 -> +1
+        action_arr[:, 6] = np.clip(action_arr[:, 6] / 30.0, -1.0, 1.0)
 
     num_frames = state_arr.shape[0]
 
     # --- Images ---
     # Files are named rgb_00000.png
-    img_files = sorted([f for f in os.listdir(traj_rgb_path) if f.endswith(".png")])
+    img_files_all = sorted([f for f in os.listdir(traj_rgb_path) if f.endswith(".png")])
+    # Apply frame skip to image files using state indices
+    img_files = [img_files_all[i] for i in state_indices if i < len(img_files_all)]
+    
     if len(img_files) != num_frames:
         print(f"Warning: {traj} has {num_frames} states but {len(img_files)} images. Skipping.")
         continue
@@ -79,7 +114,10 @@ for traj in tqdm(trajectories, desc="Trajectories"):
 
     # --- Point clouds ---
     # Files are named pc_00000.ply
-    pc_files = sorted([f for f in os.listdir(traj_pc_path) if f.endswith(".ply")])
+    pc_files_all = sorted([f for f in os.listdir(traj_pc_path) if f.endswith(".ply")])
+    # Apply frame skip to point cloud files using state indices
+    pc_files = [pc_files_all[i] for i in state_indices if i < len(pc_files_all)]
+    
     if len(pc_files) != num_frames:
         print(f"Warning: {traj} has {num_frames} states but {len(pc_files)} point clouds. Skipping.")
         # Remove images added above? Or better skip earlier.
@@ -147,7 +185,7 @@ state_chunk_size = (CHUNK_SIZE, all_states.shape[1])
 
 # Save datasets to data/ group
 print("Saving to Zarr...")
-data_group.create_dataset('img', data=all_imgs, chunks=img_chunk_size, dtype='uint8', compressor=compressor)
+#data_group.create_dataset('img', data=all_imgs, chunks=img_chunk_size, dtype='uint8', compressor=compressor)
 data_group.create_dataset('point_cloud', data=all_pcs, chunks=pc_chunk_size, dtype='float32', compressor=compressor)
 data_group.create_dataset('action', data=all_actions, chunks=action_chunk_size, dtype='float32', compressor=compressor)
 data_group.create_dataset('state', data=all_states, chunks=state_chunk_size, dtype='float32', compressor=compressor)
@@ -157,7 +195,7 @@ meta_group.create_dataset('episode_ends', data=episode_ends, chunks=(len(episode
 
 print(f"\nSaved Zarr file: {OUT_ZARR}")
 print("Dataset structure:")
-print(f"  data/img: {all_imgs.shape}")
+#print(f"  data/img: {all_imgs.shape}")
 print(f"  data/point_cloud: {all_pcs.shape}")
 print(f"  data/action: {all_actions.shape}")
 print(f"  data/state: {all_states.shape}")
