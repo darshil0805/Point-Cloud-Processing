@@ -36,7 +36,7 @@ def process_point_cloud(pc_xyz, pc_rgb):
     WORK_SPACE = [
         [-0.05, 0.4],  # X (radius)
         [-0.12, 0.35],  # Y (radius)
-        [0, 0.6]   # Z (height)
+        [-0.008, 0.6]   # Z (height)
     ]
 
     mask = (
@@ -72,8 +72,8 @@ def save_ply(path, xyz, rgb):
 # ---------------------------
 # MAIN BATCH PROCESSOR
 # ---------------------------
-INPUT_ROOT = "/home/skills/varun/puru_test/sample_bag/extracted_data_one_camera/point_clouds_depth/sample_bag/camera_global_frame"
-OUTPUT_ROOT = "/home/skills/varun/puru_test/sample_bag/extracted_data_one_camera/point_clouds_depth/sample_bag/camera_global_frame_filtered"
+INPUT_ROOT = "/media/skills/RRC HDD A/cross-emb/real-lab-data/feb-01-3/point_clouds_aligned_test/feb-01-3/point_clouds_aligned/global_frame"
+OUTPUT_ROOT = "/media/skills/RRC HDD A/cross-emb/real-lab-data/feb-01-3/point_clouds_aligned_test/feb-01-3/point_clouds_aligned/global_frame_filtered"
 
 os.makedirs(OUTPUT_ROOT, exist_ok=True)
 

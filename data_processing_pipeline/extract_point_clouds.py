@@ -20,21 +20,20 @@ from rosidl_runtime_py.utilities import get_message
 # --- CONFIG ---
 BAG_PATH = "/home/skills/varun/latest_jan/jan_24_1"
 EXTRACTED_DATA_ROOT = "/home/skills/varun/latest_jan/extracted_data_all/jan_24_1"
-OUTPUT_ROOT = "/home/skills/varun/latest_jan/point_clouds_aligned_test/jan_24_1/point_clouds_aligned"
+OUTPUT_ROOT = "/home/skills/varun/latest_jan/point_clouds_aligned_test/jan_24_1/point_clouds_aligned_inverted"
 
 URDF_PATH = "/home/skills/varun/Point-Cloud-Processing/lite-6-updated-urdf/lite_6_new.urdf"
 EEF_INDEX = 6
 
 # Extrinsics: Depth to Color (Manual Alignment)
 # Assuming both cameras are the same model (e.g., RealSense D435)
-T_COLOR_OPTICAL_DEPTH_OPTICAL = np.array([
+T_DEPTH_TO_COLOR = np.array([
     [ 1.0,      0.0,      0.0,     -0.059 ],
     [ 0.0,      1.0,      0.0,    0.0    ],
     [ 0.0,      0.0,      1.0,    0.0    ],
     [ 0.0,      0.0,      0.0,      1.0    ]
 ], dtype=np.float32)
-T_DEPTH_TO_COLOR = np.linalg.inv(T_COLOR_OPTICAL_DEPTH_OPTICAL)
-
+#T_DEPTH_TO_COLOR = np.linalg.inv(T_COLOR_OPTICAL_DEPTH_OPTICAL)
 # Camera 1 (Wrist): EEF -> Depth Camera Optical Frame
 EEF_TO_WRIST_CAM = np.array([
     [-0.0140339,  -0.99989573,  0.00340287,  0.05830656 ],

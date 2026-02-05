@@ -14,8 +14,8 @@ from rosidl_runtime_py.utilities import get_message
 # -------------------------
 # CONFIG
 # -------------------------
-BAG_PATH = "/home/skills/varun/nitin_vis_jan8_no_gripper/jan9_recording1"
-OUTPUT_ROOT = "/home/skills/varun/nitin_vis_jan8_no_gripper/jan9_recording1/extracted_data_one_camera"
+BAG_PATH = "/home/skills/varun/puru_test/sample_bag"
+OUTPUT_ROOT = "/home/skills/varun/puru_test/sample_bag/extracted_data_one_camera"
 
 # Topics to extract
 TOPICS = {

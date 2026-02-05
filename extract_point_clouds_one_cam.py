@@ -13,9 +13,9 @@ import rosbag2_py
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-BAG_PATH = "/home/skills/varun/nitin_vis_jan8_no_gripper/jan9_recording1"
-EXTRACTED_DATA_ROOT = "/home/skills/varun/nitin_vis_jan8_no_gripper/jan9_recording1/extracted_data_one_camera"
-OUTPUT_ROOT = "/home/skills/varun/nitin_vis_jan8_no_gripper/jan9_recording1/extracted_data_one_camera/point_clouds_depth"
+BAG_PATH = "/home/skills/varun/puru_test/sample_bag"
+EXTRACTED_DATA_ROOT = "/home/skills/varun/puru_test/sample_bag/extracted_data_one_camera"
+OUTPUT_ROOT = "/home/skills/varun/puru_test/sample_bag/extracted_data_one_camera/point_clouds_depth"
 
 # --- COLOR TO DEPTH OFFSET (RealSense Baseline) ---
 # Use this if your extrinsics are for 'color_optical_frame' but points are in 'depth_optical_frame'
@@ -34,9 +34,9 @@ USE_COLOR_INTRINSICS = False  # True = RGB intrinsics (recommended for RealSense
 
 # Camera extrinsics (Base -> Camera)
 BASE_TO_EXT_CAM = np.array([
-    [ 0.9985, -0.0394,  0.0382,  0.2724],
-    [-0.0373,  0.0231,  0.9990, -0.7900],
-    [-0.0402, -0.9990,  0.0216,  0.3268],
+    [ 0.9997, -0.0232,  0.0054,  0.425 ],
+    [-0.0048,  0.0249,  0.9997, -0.7518],
+    [-0.0234, -0.9994,  0.0248,  0.3408],
     [ 0.0000,  0.0000,  0.0000,  1.0000]
 ], dtype=np.float32)
 
