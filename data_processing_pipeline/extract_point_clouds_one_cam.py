@@ -14,22 +14,13 @@ import rosbag2_py
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-# --- CONFIG ---
-BAG_PATH = "/media/skills/RRC HDD A/cross-emb/real-lab-data/feb-01-3"
-EXTRACTED_DATA_ROOT = "/media/skills/RRC HDD A/cross-emb/real-lab-data/feb-01-3/extracted_data_one_camera/feb-01-3"
-OUTPUT_ROOT = "/media/skills/RRC HDD A/cross-emb/real-lab-data/feb-01-3/point_clouds_aligned_test/feb-01-3/point_clouds_aligned"
-
-# Extrinsics: Depth to Color (Manual Alignment)
 T_DEPTH_TO_COLOR = np.array([
     [ 1.0,      0.0,      0.0,     -0.059 ],
     [ 0.0,      1.0,      0.0,    0.0    ],
     [ 0.0,      0.0,      1.0,    0.0    ],
     [ 0.0,      0.0,      0.0,      1.0    ]
 ], dtype=np.float32)
-#T_DEPTH_TO_COLOR = np.linalg.inv(T_COLOR_OPTICAL_DEPTH_OPTICAL)
 
-# Camera extrinsics (Base -> Depth Camera Optical Frame)
-# Note: If calibration was done for color frame, this should be adjusted.
 BASE_TO_EXT_CAM = np.array([
     [-0.5777,  0.4385, -0.6884,  0.7814],
     [ 0.7992,  0.1327, -0.5862,  0.4271],
@@ -43,9 +34,6 @@ CAMERA_INFO_TOPICS = {
     'depth': '/camera/camera/depth/camera_info',
 }
 
-# -------------------------
-# HELPER FUNCTIONS
-# -------------------------
 def extract_intrinsics(bag_path):
     reader = rosbag2_py.SequentialReader()
     reader.open(rosbag2_py.StorageOptions(uri=bag_path, storage_id="sqlite3"), rosbag2_py.ConverterOptions("", ""))
@@ -89,20 +77,31 @@ def align_colors(pts_cam, rgb, color_params, T_depth_to_color):
     colors[mask] = rgb[v_idx[mask], u_idx[mask]] / 255.0
     return colors, mask
 
-def process():
-    intrinsics = extract_intrinsics(BAG_PATH)
+def process(bag_path, extracted_data_root, output_root, base_to_ext_cam):
+    intrinsics = extract_intrinsics(bag_path)
     
     # Setup directories
     for subdir in ['camera_frame', 'global_frame']:
-        os.makedirs(os.path.join(OUTPUT_ROOT, subdir), exist_ok=True)
+        os.makedirs(os.path.join(output_root, subdir), exist_ok=True)
 
-    rgb_path = os.path.join(EXTRACTED_DATA_ROOT, "camera", "rgb")
-    depth_path = os.path.join(EXTRACTED_DATA_ROOT, "camera", "depth")
+    rgb_path = os.path.join(extracted_data_root, "camera", "rgb")
+    depth_path = os.path.join(extracted_data_root, "camera", "depth")
+    
+    if not os.path.exists(rgb_path):
+        print(f"ERROR: RGB path does not exist: {rgb_path}")
+        return
+    
     rgb_files = sorted([f for f in os.listdir(rgb_path) if f.endswith('.png')])
     
     for i in range(len(rgb_files)):
-        rgb = cv2.cvtColor(cv2.imread(os.path.join(rgb_path, f"rgb_{i:05d}.png")), cv2.COLOR_BGR2RGB)
-        depth = np.load(os.path.join(depth_path, f"depth_{i:05d}.npy"))
+        rgb_file = os.path.join(rgb_path, f"rgb_{i:05d}.png")
+        depth_file = os.path.join(depth_path, f"depth_{i:05d}.npy")
+        
+        if not os.path.exists(rgb_file) or not os.path.exists(depth_file):
+            continue
+
+        rgb = cv2.cvtColor(cv2.imread(rgb_file), cv2.COLOR_BGR2RGB)
+        depth = np.load(depth_file)
         
         pts_cam = deproject(depth, intrinsics['depth'])
         colors, proj_mask = align_colors(pts_cam, rgb, intrinsics['color'], T_DEPTH_TO_COLOR)
@@ -114,16 +113,34 @@ def process():
         pcd_cam = o3d.geometry.PointCloud()
         pcd_cam.points = o3d.utility.Vector3dVector(pts_v)
         pcd_cam.colors = o3d.utility.Vector3dVector(clrs_v)
-        o3d.io.write_point_cloud(os.path.join(OUTPUT_ROOT, "camera_frame", f"pc_{i:05d}.ply"), pcd_cam)
+        o3d.io.write_point_cloud(os.path.join(output_root, "camera_frame", f"pc_{i:05d}.ply"), pcd_cam)
         
         # Save global frame
-        pts_g = (BASE_TO_EXT_CAM @ np.column_stack([pts_v, np.ones(len(pts_v))]).T).T[:, :3]
+        pts_g = (base_to_ext_cam @ np.column_stack([pts_v, np.ones(len(pts_v))]).T).T[:, :3]
         pcd_global = o3d.geometry.PointCloud()
         pcd_global.points = o3d.utility.Vector3dVector(pts_g)
         pcd_global.colors = o3d.utility.Vector3dVector(clrs_v)
-        o3d.io.write_point_cloud(os.path.join(OUTPUT_ROOT, "global_frame", f"pc_{i:05d}.ply"), pcd_global)
+        o3d.io.write_point_cloud(os.path.join(output_root, "global_frame", f"pc_{i:05d}.ply"), pcd_global)
 
         if (i+1) % 50 == 0: print(f"  Processed {i+1} frames...")
 
+import argparse
+
+def main():
+    parser = argparse.ArgumentParser(description="Extract point clouds from RGB-D data.")
+    parser.add_argument("--bag_path", type=str, required=True)
+    parser.add_argument("--extracted_data_root", type=str, required=True)
+    parser.add_argument("--output_root", type=str, required=True)
+    parser.add_argument("--extrinsics", type=str, help="Comma-separated 16 floats for BASE_TO_EXT_CAM matrix")
+    args = parser.parse_args()
+
+    if args.extrinsics:
+        ext = np.fromstring(args.extrinsics, sep=',').reshape(4, 4)
+    else:
+        # Default fallback if not provided
+        ext = np.array(BASE_TO_EXT_CAM, dtype=np.float32)
+
+    process(args.bag_path, args.extracted_data_root, args.output_root, ext)
+
 if __name__ == "__main__":
-    process()
+    main()

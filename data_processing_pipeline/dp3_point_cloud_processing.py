@@ -4,9 +4,6 @@ import open3d as o3d
 import torch
 import pytorch3d.ops as torch3d_ops
 
-# ---------------------------
-# FARTHEST POINT SAMPLING
-# ---------------------------
 def farthest_point_sampling(points, num_points=2500, use_cuda=False):
     K = [num_points]
 
@@ -23,10 +20,6 @@ def farthest_point_sampling(points, num_points=2500, use_cuda=False):
 
     return sampled, idx
 
-
-# ---------------------------
-# WORKSPACE CROP + FPS
-# ---------------------------
 def process_point_cloud(pc_xyz, pc_rgb):
     """
     pc_xyz: (N, 3)
@@ -58,10 +51,6 @@ def process_point_cloud(pc_xyz, pc_rgb):
 
     return pc_xyz_fps, pc_rgb_fps
 
-
-# ---------------------------
-# SAVE PLY
-# ---------------------------
 def save_ply(path, xyz, rgb):
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(xyz)
@@ -69,44 +58,48 @@ def save_ply(path, xyz, rgb):
     o3d.io.write_point_cloud(path, pcd, write_ascii=False)
 
 
-# ---------------------------
-# MAIN BATCH PROCESSOR
-# ---------------------------
-INPUT_ROOT = "/media/skills/RRC HDD A/cross-emb/real-lab-data/feb-01-3/point_clouds_aligned_test/feb-01-3/point_clouds_aligned/global_frame"
-OUTPUT_ROOT = "/media/skills/RRC HDD A/cross-emb/real-lab-data/feb-01-3/point_clouds_aligned_test/feb-01-3/point_clouds_aligned/global_frame_filtered"
+def process(input_root, output_root):
+    os.makedirs(output_root, exist_ok=True)
 
-os.makedirs(OUTPUT_ROOT, exist_ok=True)
+    ply_files = sorted([f for f in os.listdir(input_root) if f.endswith(".ply")])
 
-# for folder in sorted(os.listdir(INPUT_ROOT)):
-in_folder = os.path.join(INPUT_ROOT)
-# if not os.path.isdir(in_folder):
-#     continue
+    print(f"\n=== Processing folder: {input_root} ({len(ply_files)} clouds) ===")
 
-out_folder = os.path.join(OUTPUT_ROOT)
-os.makedirs(out_folder, exist_ok=True)
+    for fn in ply_files:
+        in_path = os.path.join(input_root, fn)
+        out_path = os.path.join(output_root, fn.replace(".ply", "_filtered.ply"))
 
-ply_files = sorted([f for f in os.listdir(in_folder) if f.endswith(".ply")])
+        print(f"\nProcessing {fn} ...")
 
-print(f"\n=== Processing folder: {in_folder} ({len(ply_files)} clouds) ===")
+        # Load
+        pcd = o3d.io.read_point_cloud(in_path)
+        if pcd.is_empty():
+            print(f"Warning: Empty point cloud at {in_path}")
+            continue
+            
+        pc_xyz = np.asarray(pcd.points)
+        pc_rgb = np.asarray(pcd.colors)
 
-for fn in ply_files:
-    in_path = os.path.join(in_folder, fn)
-    out_path = os.path.join(out_folder, fn.replace(".ply", "_filtered.ply"))
+        print(f"Loaded XYZ: {pc_xyz.shape} | RGB: {pc_rgb.shape}")
 
-    print(f"\nProcessing {fn} ...")
+        # Filter
+        xyz_f, rgb_f = process_point_cloud(pc_xyz, pc_rgb)
+        # Save
+        save_ply(out_path, xyz_f, rgb_f)
 
-    # Load
-    pcd = o3d.io.read_point_cloud(in_path)
-    pc_xyz = np.asarray(pcd.points)
-    pc_rgb = np.asarray(pcd.colors)
+        print(f"Saved → {out_path}")
 
-    print(f"Loaded XYZ: {pc_xyz.shape} | RGB: {pc_rgb.shape}")
+    print(f"\nDone. All filtered clouds saved in {output_root}")
 
-    # Filter
-    xyz_f, rgb_f = process_point_cloud(pc_xyz, pc_rgb)
-    # Save
-    save_ply(out_path, xyz_f, rgb_f)
+import argparse
 
-    print(f"Saved → {out_path}")
+def main():
+    parser = argparse.ArgumentParser(description="Process point clouds with FPS and workspace cropping.")
+    parser.add_argument("--input_root", type=str, required=True)
+    parser.add_argument("--output_root", type=str, required=True)
+    args = parser.parse_args()
 
-print("\n✔ Done. All filtered clouds saved in ./filtered-pc/")
+    process(args.input_root, args.output_root)
+
+if __name__ == "__main__":
+    main()

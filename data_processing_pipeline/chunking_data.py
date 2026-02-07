@@ -7,17 +7,14 @@ import open3d as o3d
 from tqdm import tqdm
 import shutil
 
-# ------------------------
-# Paths and parameters
-# ------------------------
-# Root directories for different data types
-EXTRACTED_DATA_ROOT = "/home/skills/varun/latest_jan/extracted_data_all"
-PC_ROOT = "/media/skills/RRC HDD A/cross-emb/Processed_Data_Rea_Training/latest_jan/point_clouds_cam2_only_color_intr_no_offset"
 
-OUT_ZARR = "/media/skills/RRC HDD A/cross-emb/Processed_Data_Rea_Training/latest_jan/full_frequency_deltas.zarr"
+DATA_ROOT = "/media/skills/RRC HDD A/cross-emb/real-lab-data/processed_data"
+EXTRACTED_DATA_ROOT = DATA_ROOT
+PC_ROOT = DATA_ROOT
+
+OUT_ZARR = "/media/skills/RRC HDD A/cross-emb/real-lab-data/full_frequency_correct.zarr"
 CHUNK_SIZE = 100  # number of samples per chunk
 
-# Frame sampling: 1 = every frame, 2 = every 2nd frame, 4 = every 4th frame, etc.
 FRAME_SKIP = 1  # Set to 1 for all frames, 4 for every 4th frame, etc.
 
 # Gripper action normalization: Convert 7th dimension from -30/0/+30 to -1/0/+1
@@ -25,11 +22,13 @@ NORMALIZE_GRIPPER = True  # Set to True to normalize gripper actions
 
 # Joint deltas: Convert actions to deltas (action_joints - state_joints) for first 6 dims
 # Gripper action (7th dim) remains unchanged
-USE_JOINT_DELTAS = True  # Set to True to use joint deltas instead of absolute positions
+USE_JOINT_DELTAS = False  # Set to True to use joint deltas instead of absolute positions
+
+#CORRECT_GRIPPER_STATES = True # 
 
 # Subdirectory structure within each trajectory folder
-PC_SUBDIR = "camera2_global_frame_filtered"
-RGB_SUBDIR = os.path.join("camera2", "rgb")
+PC_SUBDIR = "filtered_point_clouds"
+RGB_SUBDIR = os.path.join("camera", "rgb")
 
 # ------------------------
 # Prepare storage with episode tracking
@@ -49,11 +48,18 @@ trajectories = sorted([d for d in os.listdir(PC_ROOT) if os.path.isdir(os.path.j
 print(f"Found {len(trajectories)} trajectories.")
 
 for traj in tqdm(trajectories, desc="Trajectories"):
-    # Paths for this trajectory - all from extracted_data_all
-    traj_extracted = os.path.join(EXTRACTED_DATA_ROOT, traj)
+    # Paths for this trajectory
+    traj_extracted = os.path.join(EXTRACTED_DATA_ROOT, traj, "extracted_data", traj)
     traj_pc_path = os.path.join(PC_ROOT, traj, PC_SUBDIR)
     traj_rgb_path = os.path.join(traj_extracted, RGB_SUBDIR)
     
+    # if CORRECT_GRIPPER_STATES:
+    #     state_file = os.path.join(traj_extracted, "states_correct.txt")
+    #     action_file = os.path.join(traj_extracted, "actions_correct.txt")
+    # else:
+    #     state_file = os.path.join(traj_extracted, "states.txt")
+    #     action_file = os.path.join(traj_extracted, "actions.txt")
+
     state_file = os.path.join(traj_extracted, "states.txt")
     action_file = os.path.join(traj_extracted, "actions.txt")
 
@@ -113,8 +119,8 @@ for traj in tqdm(trajectories, desc="Trajectories"):
         all_imgs.append(img_arr)
 
     # --- Point clouds ---
-    # Files are named pc_00000.ply
-    pc_files_all = sorted([f for f in os.listdir(traj_pc_path) if f.endswith(".ply")])
+    # Files are named pc_00000_filtered.ply
+    pc_files_all = sorted([f for f in os.listdir(traj_pc_path) if f.endswith("_filtered.ply")])
     # Apply frame skip to point cloud files using state indices
     pc_files = [pc_files_all[i] for i in state_indices if i < len(pc_files_all)]
     

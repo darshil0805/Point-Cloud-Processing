@@ -11,13 +11,6 @@ import rosbag2_py
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-# -------------------------
-# CONFIG
-# -------------------------
-BAG_PATH = "/media/skills/RRC HDD A/cross-emb/real-lab-data/feb-01-3"
-OUTPUT_ROOT = "/media/skills/RRC HDD A/cross-emb/real-lab-data/feb-01-3/extracted_data_one_camera"
-
-# Topics to extract (using 'camera' namespace as requested)
 TOPICS = {
     'gripper_state': '/gripper/state',
     'gripper_command': '/gripper/command',
@@ -26,6 +19,7 @@ TOPICS = {
     'camera_depth': '/camera/camera/depth/image_rect_raw',
     'camera_color_info': '/camera/camera/color/camera_info',
     'camera_depth_info': '/camera/camera/depth/camera_info',
+    'joint_command': '/lite6_traj_controller/joint_trajectory',
 }
 
 # -------------------------
@@ -86,7 +80,7 @@ def extract_gripper_state(msg):
             return float(msg.position[0]) if len(msg.position) > 0 else 0.0
         return float(msg.position)
     else:
-        print("⚠️ Warning: Unknown gripper state format")
+        print("Warning: Unknown gripper state format")
         return 0.0
 
 def extract_joint_positions(msg):
@@ -94,12 +88,24 @@ def extract_joint_positions(msg):
     if hasattr(msg, 'position'):
         return np.array(msg.position, dtype=np.float32)
     else:
-        print("⚠️ Warning: No position field in joint state")
+        print("Warning: No position field in joint state")
         return np.zeros(6, dtype=np.float32)
 
-# -------------------------
-# MAIN PROCESSING
-# -------------------------
+def extract_gripper_command(msg):
+    """Extract gripper command value from message."""
+    if hasattr(msg, 'data'):
+        return float(msg.data)
+    else:
+        print("Warning: Unknown gripper command format")
+        return 0.0
+
+def extract_cmd_positions(msg):
+    """Extract joint positions from JointTrajectory message."""
+    if hasattr(msg, 'points') and len(msg.points) > 0:
+        if hasattr(msg.points[0], 'positions'):
+            return np.array(msg.points[0].positions, dtype=np.float32)[:6]
+    return np.zeros(6, dtype=np.float32)
+
 def process_bag(bag_path, output_root):
     """Process bag file and extract synchronized data from a single camera."""
     print(f"\n=== Processing bag (Single Camera): {bag_path} ===")
@@ -148,21 +154,21 @@ def process_bag(bag_path, output_root):
     for key in data.keys():
         print(f"  {key}: {len(data[key]['msgs'])}")
     
-    # Check if we have gripper state data
-    if len(data['gripper_state']['msgs']) == 0:
-        print("\n❌ ERROR: No gripper state messages found.")
+    # Master Timestep: Gripper Command (usually lowest frequency)
+    if len(data['gripper_command']['msgs']) == 0:
+        print("\n ERROR: No gripper command messages found.")
         return
     
-    # Synchronize to gripper state timestamps
-    print("\n=== Synchronizing to gripper state timestamps ===")
-    master_ts = data['gripper_state']['ts']
+    # Synchronize to gripper command timestamps
+    print("\n=== Synchronizing to gripper command (master) timestamps ===")
+    master_ts = data['gripper_command']['ts']
     N = len(master_ts)
-    print(f"Master frames: {N}")
+    print(f"Master frames (N): {N}")
     
-    # Compute alignment indices for all topics
+    # Compute alignment indices for all topics relative to master_ts
     indices = {}
     for key in data.keys():
-        if key != 'gripper_state' and len(data[key]['msgs']) > 0:
+        if key != 'gripper_command' and len(data[key]['msgs']) > 0:
             indices[key] = align_to(master_ts, data[key]['ts'])
         else:
             indices[key] = None
@@ -178,32 +184,57 @@ def process_bag(bag_path, output_root):
         os.makedirs(d, exist_ok=True)
     
     # Process synchronized frames
-    print("\n=== Extracting and saving data ===")
+    print("\n=== Extracting and saving data (Filtering stationary frames) ===")
     states = []
+    actions = []
     saved_frames = 0
+    prev_state = None
     
     for i in range(N):
-        frame_saved = True
+        # 1. Get Gripper Command (direct action value)
+        gripper_cmd_msg = data['gripper_command']['msgs'][i]
+        gripper_cmd_val = extract_gripper_command(gripper_cmd_msg)
         
-        # Get gripper state (master timestamp)
-        gripper_state_msg = data['gripper_state']['msgs'][i]
-        gripper_state_val = extract_gripper_state(gripper_state_msg)
-        
-        # Get joint states
+        # 2. Get synchronized Joint States (for current state)
         joint_pos = None
         if indices['joint_states'] is not None:
             joint_msg = data['joint_states']['msgs'][indices['joint_states'][i]]
             joint_pos = extract_joint_positions(joint_msg)
+        else:
+            continue # Should not happen if joint_states topic exists
+            
+        # 3. Get synchronized Joint Commands (for actions)
+        cmd_pos = np.zeros(6, dtype=np.float32)
+        if indices['joint_command'] is not None:
+            cmd_msg = data['joint_command']['msgs'][indices['joint_command'][i]]
+            cmd_pos = extract_cmd_positions(cmd_msg)
+
+        # 4. Get synchronized Gripper State
+        gripper_state_val = 0.0
+        if indices['gripper_state'] is not None:
+            gripper_state_msg = data['gripper_state']['msgs'][indices['gripper_state'][i]]
+            gripper_state_val = extract_gripper_state(gripper_state_msg)
+        
+        # Build current state vector
+        current_state = np.hstack([joint_pos[:6], np.array([gripper_state_val], dtype=np.float32)])
+        
+        # Check for change from previous state
+        if prev_state is not None:
+            if np.allclose(current_state, prev_state, atol=1e-5):
+                continue
+        
+        # 4. Save Camera Data (Now that we know the state changed)
+        frame_saved = True
         
         # Save Camera RGB
         if indices['camera_rgb'] is not None:
             try:
                 rgb_msg = data['camera_rgb']['msgs'][indices['camera_rgb'][i]]
                 rgb_arr = convert_rgb_msg(rgb_msg)
-                rgb_path = os.path.join(camera_rgb_out, f"rgb_{i:05d}.png")
+                rgb_path = os.path.join(camera_rgb_out, f"rgb_{saved_frames:05d}.png")
                 cv2.imwrite(rgb_path, cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2BGR))
             except Exception as e:
-                print(f"⚠️ Warning: Failed to save Camera RGB frame {i}: {e}")
+                print(f"Warning: Failed to save Camera RGB frame {i}: {e}")
                 frame_saved = False
         
         # Save Camera Depth
@@ -211,58 +242,49 @@ def process_bag(bag_path, output_root):
             try:
                 depth_msg = data['camera_depth']['msgs'][indices['camera_depth'][i]]
                 depth_arr = convert_depth_msg(depth_msg)
-                depth_path = os.path.join(camera_depth_out, f"depth_{i:05d}.npy")
+                depth_path = os.path.join(camera_depth_out, f"depth_{saved_frames:05d}.npy")
                 np.save(depth_path, depth_arr)
             except Exception as e:
-                print(f"⚠️ Warning: Failed to save Camera depth frame {i}: {e}")
-        
-        # Build state vector (6 joints + gripper state)
-        if joint_pos is not None and frame_saved:
-            state_vec = np.hstack([joint_pos[:6], np.array([gripper_state_val], dtype=np.float32)])
-            states.append(state_vec)
+                print(f"Warning: Failed to save Camera depth frame {i}: {e}")
+
+        if frame_saved:
+            # Action: [commanded_joints(6), gripper_command(1)]
+            action_vec = np.hstack([cmd_pos, np.array([gripper_cmd_val], dtype=np.float32)])
+            
+            states.append(current_state)
+            actions.append(action_vec)
+            prev_state = current_state
             saved_frames += 1
         
         if (i + 1) % 100 == 0:
             print(f"  Processed {i+1}/{N} frames...")
     
-    print(f"\n✓ Saved {saved_frames} frames")
+    print(f"\nSaved {saved_frames} frames")
     
     # Save states and actions
     if len(states) > 0:
         states = np.vstack(states).astype(np.float32)
-        
-        # Simple action computation (deltas)
-        actions = np.zeros_like(states, dtype=np.float32)
-        actions[1:] = states[1:] - states[:-1]
-        
-        # Filter stationary frames
-        nonzero_idx = np.any(actions != 0, axis=1)
-        num_zero_frames = np.sum(~nonzero_idx)
-        
-        if num_zero_frames > 0:
-            print(f"  Filtering out {num_zero_frames} stationary frames...")
-            states_filtered = states[nonzero_idx]
-            actions_filtered = actions[nonzero_idx]
-            
-            # Note: For simplicity in this "one camera" script, 
-            # we overwrite files sequentially if needed, or user can re-run extraction.
-            # (Keeping the filtering logic similar to extract_topics.py but cleaner)
-            
-            # Renumbering logic (Optional depending on user requirement, 
-            # keeping it simple for now by just saving the states.txt for the saved frames)
-        else:
-            states_filtered = states
-            actions_filtered = actions
+        actions = np.vstack(actions).astype(np.float32)
 
         states_file = os.path.join(traj_out, "states.txt")
         actions_file = os.path.join(traj_out, "actions.txt")
-        np.savetxt(states_file, states_filtered, fmt="%.6f")
-        np.savetxt(actions_file, actions_filtered, fmt="%.6f")
+        np.savetxt(states_file, states, fmt="%.6f")
+        np.savetxt(actions_file, actions, fmt="%.6f")
         
-        print(f"\n✓ States saved: {states_file} ({states_filtered.shape})")
-        print(f"✓ Actions saved: {actions_file} ({actions_filtered.shape})")
+        print(f"\nStates saved: {states_file} ({states.shape})")
+        print(f"\nActions saved: {actions_file} ({actions.shape})")
     
-    print(f"\n✓ Processing complete!")
+    print(f"\nProcessing complete!")
+
+import argparse
+
+def main():
+    parser = argparse.ArgumentParser(description="Extract and synchronize ROS2 bag topics.")
+    parser.add_argument("--bag_path", type=str, required=True, help="Path to the ROS2 bag file.")
+    parser.add_argument("--output_root", type=str, required=True, help="Root directory for extracted data.")
+    args = parser.parse_args()
+
+    process_bag(args.bag_path, args.output_root)
 
 if __name__ == "__main__":
-    process_bag(BAG_PATH, OUTPUT_ROOT)
+    main()

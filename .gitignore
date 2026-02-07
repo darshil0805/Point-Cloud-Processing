@@ -2,3 +2,4 @@
 *.rrd
 /scratchbook
 final_no_eef.zarr
+/old_scripts
