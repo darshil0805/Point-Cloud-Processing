@@ -5,6 +5,7 @@
 ### To perform data processing for one trajectory:
 ```bash
 cd data_processing_pipeline
+source /opt/ros/humble/setup.bash
 ```
 1. Extract topics from bag file:
 ```bash
